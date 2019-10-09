@@ -4,12 +4,13 @@
 #include "CompCodegen.h"
 
 #include "nlohmann/json.hpp"
+#include "fmt/format.h"
 #include <fstream>
 #include <string>
 #include <vector>
 #include <iostream>
 using json = nlohmann::json;
-
+using namespace fmt::literals;
 struct Parameter
 {
 	std::string name;
@@ -62,8 +63,12 @@ void write_parameter(const  Parameter& param, Document& outdc)
 {
 	outdc.add_line("");
 	outdc.add_line("//newval -------");
-	outdc.add_line(param.type_name + "  " + param.name + ";");
+	outdc.add_line(fmt::format("{} {};",param.type_name, param.name));
 };
+
+std::string quoted(const std::string& original) {
+	return fmt::format("\"{}\"",original);
+}
 
 std::string to_unreal_type(const std::string& type_name)
 {
@@ -84,14 +89,14 @@ void write_parameter_unreal(const  Parameter& param, Document& outdc)
 	outdc.add_line("");
 	outdc.add_line("//newval -------");
 	outdc.add_line("UPROPERTY(EditAnywhere,BlueprintReadWrite,Category = Component)");
-	outdc.add_line(to_unreal_type(param.type_name) + "  " + param.name + ";");
+	outdc.add_line(fmt::format("{} {};", to_unreal_type(param.type_name), param.name));
 };
 
 void write_component(const Component& cmp, Document& outdc)
 {
 	outdc.add_line("");
 	outdc.add_line("//component-------");
-	outdc.add_line("struct " + cmp.name + " { ");
+	outdc.add_line(fmt::format("struct {} {",cmp.name));
 	outdc.current_indent++;
 	for (auto& p : cmp.parameters)
 	{
@@ -111,7 +116,7 @@ void write_component_unreal(const Component& cmp, Document& outdc)
 	outdc.add_line("USTRUCT(BlueprintType)");
 
 
-	outdc.add_line("struct " + unrealname + " { ");
+	outdc.add_line(fmt::format("struct {} {{", unrealname));
 	outdc.current_indent++;
 	outdc.add_line("GENERATED_USTRUCT_BODY()");
 	for (auto& p : cmp.parameters)
@@ -127,19 +132,18 @@ void write_imgui_param(const Parameter& param, Document& outdc)
 	outdc.add_line("");
 	outdc.add_line("//edit -------");
 
+	std::string name_quoted = quoted(param.name);
 	if (param.type_name.compare("f32") == 0)
-	{
-
-		outdc.add_line("ImGui::InputFloat(\"" + param.name + "\", &component." + param.name + ");");
+	{	
+		outdc.add_line(fmt::format("ImGui::InputFloat({},&component.{});", name_quoted, param.name));
 	}
 	else if (param.type_name.compare("vec3") == 0)
 	{
-
-		outdc.add_line("ImGui::InputFloat3(\"" + param.name + "\", &component." + param.name + ");");
+		outdc.add_line(fmt::format("ImGui::InputFloat3({},&component.{}[0]);", name_quoted, param.name));
 	}
 	else
 	{
-		outdc.add_line("// parameter" + param.name + "not editable");
+		outdc.add_line(fmt::format("// parameter {} not editable", param.name));
 	}
 
 };
@@ -147,7 +151,7 @@ void write_imgui_param(const Parameter& param, Document& outdc)
 void write_imgui_edit(const Component& cmp, Document& outdc)
 {
 	outdc.add_line("//editor");
-	outdc.add_line("void imgui_edit_comp_" + cmp.name + "(const " + cmp.name + "&component) {");
+	outdc.add_line(fmt::format("void imgui_edit_comp_{type}(const {type} &component) {{", "type"_a = cmp.name));
 	outdc.current_indent++;
 
 	for (auto& p : cmp.parameters)
@@ -167,10 +171,12 @@ void write_entt_edit(std::vector<Component>& components, Document& outdc)
 
 	for (auto& cmp : components)
 	{
-		outdc.add_line("if(rg.has<" + cmp.name + ">(id){");
+
+		outdc.add_line(fmt::format("if(rg.has<{type}>(id) {{", "type"_a = cmp.name));
+		
 		outdc.current_indent++;
 
-		outdc.add_line("imgui_edit_comp_" + cmp.name + "(rg.get<" + cmp.name + ">(id));");
+		outdc.add_line(fmt::format("imgui_edit_comp_{type}(rg.get<{type}>(id));", "type"_a = cmp.name));
 
 
 		outdc.current_indent--;
