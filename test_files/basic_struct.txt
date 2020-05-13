@@ -1,7 +1,7 @@
 struct MyComponent{
-x : f32; //comment
-y : i32 = 6376;
-y2 : f32 = 50.f;
+x  :f32; //comment
+y  : i32 = 6376;
+y2 : f32 = 50.f #[ slider_min = -0.5f, slider_max=1.5];
 z:i64[];
 zarray:i64[42];
 //comment g:;asf542w

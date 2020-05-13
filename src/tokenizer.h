@@ -6,6 +6,7 @@ enum class TokenType : char {
 	STRING,
 	KEYWORD,
 	SEMICOLON,
+	COMMA,
 	COMMENT,
 	EQUALS,
 	FLOAT_LITERAL,
@@ -15,6 +16,8 @@ enum class TokenType : char {
 	CURLY_BRACKET_CLOSE,
 	SQUARE_BRACKET_OPEN,
 	SQUARE_BRACKET_CLOSE,
+	REFLINFO_BEGIN,
+	REFLINFO_END,
 	NONE
 }; 
 
@@ -58,10 +61,14 @@ std::string to_string(TokenType ttype) {
 		return "SQUARE BRACKET CLOSE";
 		break;
 
-
-
-	case TokenType::NONE:
-		return "NONE";
+	case TokenType::REFLINFO_BEGIN:
+		return "REFLECTION BEGIN";
+		break;
+	case TokenType::COMMA:
+		return "COMMA";
+		break;
+	case TokenType::REFLINFO_END:
+		return "REFLECTION END";
 		break;
 	default:
 		return "ERROR";
@@ -83,6 +90,8 @@ enum class CharacterType : char {
 	DOT,
 	NEWLINE,
 	EQUALS,
+	HASH,
+	COMMA,
 	OTHER
 };
 
@@ -101,6 +110,10 @@ struct Token {
 	};
 	StringView str;
 	TokenType type;
+
+	std::string_view view() {
+		return std::string_view{ str.ptr,str.size };
+	}
 };
 
 #include<stdio.h>
@@ -149,34 +162,27 @@ Token build_token(TokenType type, const char* start, const char* end) {
 			return tk;
 		}
 
-		//check for numerals
-		bool hasF = view.back() == 'f';
 		bool hasDot = false;
-
-		if (hasF)
-		{
-			view = std::string_view{ start,size - 1 };
-		}
-		
-
 		for (auto c : view) {
 			if (c == '.') {
 				hasDot = true;
-			}
-			else if (!is_number(c)) {
-				//break all, not a number
-				return tk;
-			}
+			}			
 		}
-		if (hasF && hasDot) {
-			tk.type = TokenType::FLOAT_LITERAL;
-			std::from_chars(start, start + size, tk.float_literal);
+
+		if (!hasDot) {
+			auto intresult = std::from_chars(start, start + size, tk.int_literal);
+
+			if (intresult.ec == std::errc())
+			{
+				tk.type = TokenType::INT_LITERAL;
+			}
 		}
 		else {
-			tk.type = TokenType::INT_LITERAL;
-
-			std::from_chars(start, start + size, tk.int_literal);
-
+			auto fltresult = std::from_chars(start, start + size, tk.float_literal);
+			if (fltresult.ec == std::errc())
+			{
+				tk.type = TokenType::FLOAT_LITERAL;
+			}
 		}
 	}
 	tk.str.ptr = start;
@@ -188,7 +194,9 @@ CharacterType get_type(char character) {
 	if (is_letter(character)) return CharacterType::LETTER;
 	if (is_number(character)) return CharacterType::DIGIT;
 	switch (character) {
-
+	case '-': return CharacterType::DIGIT; break;
+	case '+': return CharacterType::DIGIT; break;
+	case '_': return CharacterType::LETTER; break;
 	case '/': return CharacterType::SLASH; break;
 	case '{': return CharacterType::CURLY_BRACKET_OPEN; break;
 	case '}': return CharacterType::CURLY_BRACKET_CLOSE; break;
@@ -200,6 +208,8 @@ CharacterType get_type(char character) {
 	case '.': return CharacterType::DOT; break;
 	case '\n': return CharacterType::NEWLINE; break;
 	case '=': return CharacterType::EQUALS; break;
+	case '#': return CharacterType::HASH; break;
+	case ',': return CharacterType::COMMA; break;
 	default: return CharacterType::OTHER;
 	}
 	return CharacterType::OTHER;
@@ -218,7 +228,9 @@ bool is_string_stop_character(char character) {
 	case CharacterType::SEMICOLON:	
 	case CharacterType::COLON:	
 	case CharacterType::NEWLINE:	
-	case CharacterType::EQUALS:	
+	case CharacterType::EQUALS:
+	case CharacterType::HASH:
+	case CharacterType::COMMA:
 	case CharacterType::OTHER:
 		return true;
 	default:
@@ -244,6 +256,8 @@ bool chartype_to_token(CharacterType ctype, TokenType& outType) {
 		outType = TokenType::COLON; return true;	
 	case CharacterType::EQUALS:
 		outType = TokenType::EQUALS; return true;		
+	case CharacterType::COMMA:
+		outType = TokenType::COMMA; return true;
 	default:
 		return false;
 	}
@@ -251,18 +265,38 @@ bool chartype_to_token(CharacterType ctype, TokenType& outType) {
 
 cppcoro::generator<Token> parse_string(const char* pars) {
 
+	bool bInsideReflectionBlock = false;
 	while (*pars) {
 		CharacterType ctype = get_type(*pars);
 		TokenType ttype = TokenType::NONE;
 		if (chartype_to_token(ctype, ttype))
 		{
-			co_yield build_token(ttype, pars, pars);			
+			if (bInsideReflectionBlock && ctype == CharacterType::SQUARE_BRACKET_CLOSE) {
+				bInsideReflectionBlock = false;
+				co_yield build_token(TokenType::REFLINFO_END, pars, pars);
+			}
+			else {
+				co_yield build_token(ttype, pars, pars);
+			}
+					
 		}
 		else
 		{		
 			switch (ctype)
-			{			
+			{
+			case CharacterType::HASH:
+			{
+				//next character HAS to be bracket open
+				const char* next = pars + 1;
+				if (*next && get_type(*next) == CharacterType::SQUARE_BRACKET_OPEN)
+				{
+					co_yield build_token(TokenType::REFLINFO_BEGIN, pars, next+1);
+					bInsideReflectionBlock = true;
+					pars = next;
 
+				}
+			}
+				break;
 			case CharacterType::DOT:
 			case CharacterType::LETTER:
 			case CharacterType::DIGIT:
@@ -298,7 +332,7 @@ cppcoro::generator<Token> parse_string(const char* pars) {
 							next++;
 						}
 						
-						co_yield build_token(TokenType::COMMENT, pars, next);
+						//co_yield build_token(TokenType::COMMENT, pars, next);
 						pars = next;
 					}
 				}

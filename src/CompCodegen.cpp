@@ -12,10 +12,27 @@
 #include <iostream>
 
 #include "tokenizer.h"
+#include <sstream>
 using json = nlohmann::json;
 using namespace fmt::literals;
+
+enum class MetadataType : char{
+	FLOAT,
+	INT,
+	STRING,
+	NONE
+};
+
+struct Metadata {
+	union {
+		float float_md;
+		int int_md;
+	};
+	MetadataType type;
+};
 struct Parameter
 {
+	std::unordered_map<std::string, Metadata> metadata;
 	std::string name;
 	std::string type_name;
 	int array_lenght = -1;
@@ -45,6 +62,27 @@ struct span {
 		return _end - _begin;
 	}
 };
+
+template<typename F>
+void split_iterate(span<Token> tokens, TokenType splitType, F&& fn) {
+	int start = 0;
+	int end = 0;
+
+	for (int i = 0; i < tokens.size(); i++) {
+		if (tokens[i].type == splitType) {
+			end = i;
+			span<Token> segment;
+			segment._begin = tokens._begin + start;
+			segment._end = tokens._begin + end;
+			fn(segment);
+			start = i + 1;
+		}	
+	}
+	span<Token> segment;
+	segment._begin = tokens._begin + start;
+	segment._end = tokens._begin + tokens.size();
+	fn(segment);
+}
 
 //<parameter> = <name> <:> <type> <array> <default> <comma>
 //<default> = nothing
@@ -84,6 +122,60 @@ bool parse_parameter(span<Token> tokens, Parameter& outC) {
 		{
 			return false;
 		}
+	}
+
+	//find metadata zone
+	int mt_start = -1;
+	int mt_end = -1;
+	for (int i = 0; i < tokens.size(); i++) {
+		if (tokens[i].type == TokenType::REFLINFO_BEGIN)
+		{
+			mt_start = i;
+		}
+		else if (tokens[i].type == TokenType::REFLINFO_END)
+		{
+			mt_end = i;
+		}
+	}
+	//reflection zone found, parse it
+	if (mt_start > 0 && mt_end > mt_start) {
+		span<Token> segment;
+		segment._begin = tokens._begin + mt_start +1;
+		segment._end = tokens._begin + mt_end;
+
+		std::unordered_map<std::string, Metadata> metadata;
+
+		//2 options, either <string> <equals> <literal> or <string>
+		split_iterate(segment, TokenType::COMMA, [&metadata](span<Token> tks) {
+			if (tks[0].type == TokenType::STRING)
+			{
+				if (tks.size() == 1) {
+					Metadata mt;
+					mt.type = MetadataType::NONE;
+					metadata[std::string(tks[0].view())] = mt;
+				}
+				else if (tks.size() == 3 && tks[1].type == TokenType::EQUALS) {
+					Metadata mt;
+					
+
+					if (tks[2].type == TokenType::INT_LITERAL)
+					{
+						mt.type = MetadataType::INT;
+						mt.int_md = tks[2].int_literal;
+					}
+					else if (tks[2].type == TokenType::FLOAT_LITERAL)
+					{
+						mt.type = MetadataType::FLOAT;
+						mt.float_md = tks[2].float_literal;
+					}
+
+					metadata[std::string(tks[0].view())] = mt;
+				}
+			}
+			
+		});
+
+		outC.metadata = std::move(metadata);
 	}
 
 
@@ -219,6 +311,32 @@ void write_parameter_unreal(const  Parameter& param, Document& outdc)
 	outdc.add_line("");
 	outdc.add_line("//newval -------");
 	outdc.add_line("UPROPERTY(EditAnywhere,BlueprintReadWrite,Category = Component)");
+
+	std::stringstream metadata_stream;
+	metadata_stream << "//";
+	bool hasMetadata = false;
+	for (auto [k, v] : param.metadata) {
+		hasMetadata = true;
+
+		switch (v.type)
+		{
+		case MetadataType::FLOAT:
+			metadata_stream << fmt::format("{} :float {} ,", k, v.float_md);
+			break;
+		case MetadataType::INT:
+			metadata_stream << fmt::format("{} :int {} ,", k, v.int_md);
+			break;
+		case MetadataType::STRING:
+			metadata_stream << fmt::format("{} :str  ,", k);
+			break;
+		case MetadataType::NONE:
+			metadata_stream << fmt::format("{} ,", k);
+			break;
+		default:
+			assert(false);
+		}	
+	}
+
 	if (param.array_lenght == -1)
 	{
 		outdc.add_line(fmt::format("{} {};", to_unreal_type(param.type_name), param.name));
@@ -230,6 +348,10 @@ void write_parameter_unreal(const  Parameter& param, Document& outdc)
 	else //sized array
 	{
 		outdc.add_line(fmt::format("{} {}[{}];", to_unreal_type(param.type_name), param.name,param.array_lenght));
+	}
+
+	if (hasMetadata) {
+		outdc.add_line( metadata_stream.str());
 	}
 	
 };
