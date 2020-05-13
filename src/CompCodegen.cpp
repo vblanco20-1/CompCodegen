@@ -3,18 +3,22 @@
 
 #include "CompCodegen.h"
 
+
 #include "nlohmann/json.hpp"
 #include "fmt/format.h"
-#include <fstream>
+#include <fstream> 
 #include <string>
 #include <vector>
 #include <iostream>
+
+#include "tokenizer.h"
 using json = nlohmann::json;
 using namespace fmt::literals;
 struct Parameter
 {
 	std::string name;
 	std::string type_name;
+	int array_lenght = -1;
 };
 
 struct Component
@@ -22,6 +26,124 @@ struct Component
 	std::vector<Parameter> parameters;
 	std::string name;
 };
+
+template<typename T>
+struct span {
+	T* _end;
+	T* _begin;
+
+	T& operator[](size_t idx)
+	{
+		return _begin[idx];
+	}
+
+	T& back() {
+		return *(_end - 1);
+	}
+
+	size_t size() {
+		return _end - _begin;
+	}
+};
+
+//<parameter> = <name> <:> <type> <array> <default> <comma>
+//<default> = nothing
+//<default> = <equals> <literal>
+//<array> = nothing
+//<array> = <open sqbracket> <int> <close sqbracket>
+bool parse_parameter(span<Token> tokens, Parameter& outC) {
+
+	if(tokens.back().type != TokenType::SEMICOLON)return false;
+
+	Token name = tokens[0];
+
+	if (name.type != TokenType::STRING) return false;
+
+	Token colon = tokens[1];
+
+	if (colon.type != TokenType::COLON) return false;
+
+	Token ptype = tokens[2];
+
+	if (ptype.type != TokenType::STRING) return false;
+
+	//array handling
+	if (tokens[3].type == TokenType::SQUARE_BRACKET_OPEN)
+	{
+		//unsized array
+		if (tokens[4].type == TokenType::SQUARE_BRACKET_CLOSE)
+		{
+			outC.array_lenght = 0;
+		}
+		//array size
+		else if (tokens[4].type == TokenType::INT_LITERAL &&  (tokens[5].type == TokenType::SQUARE_BRACKET_CLOSE))
+		{
+			outC.array_lenght = tokens[4].int_literal;
+		}
+		else
+		{
+			return false;
+		}
+	}
+
+
+	//no literal handling yet
+	outC.name = std::string_view{ name.str.ptr,name.str.size };
+	outC.type_name = std::string_view{ ptype.str.ptr,ptype.str.size };
+
+	return true;
+}
+
+//<component> = <struct> <name> <open_bracket> <inner> <close_bracket>
+//<inner> = array<parameter>
+
+bool parse_component(span<Token> tokens, Component& outC) {
+	
+	Component newComp;
+
+	if (tokens[0].type != TokenType::KEYWORD) return false;
+
+	Token compname = tokens[1];
+
+	if (compname.type != TokenType::STRING) return false;
+
+	if (tokens[2].type != TokenType::CURLY_BRACKET_OPEN) return false;
+
+	newComp.name = std::string_view{ compname.str.ptr,compname.str.size };
+
+	//cut the parameter token streams
+	int _cursor = 3;
+	while (tokens[_cursor].type != TokenType::CURLY_BRACKET_CLOSE) {
+		int _cursorend = -1;
+		//find next comma
+		for (int i = _cursor; i < tokens.size(); i++) {
+
+			//end of comp
+			if (tokens[i].type == TokenType::SEMICOLON)
+			{
+				_cursorend = i;
+				break;
+			}
+		}
+		if (_cursorend > _cursor) {
+			Parameter param;
+
+			span<Token> paramTokens;
+			paramTokens._begin = &tokens[_cursor];
+			paramTokens._end = &tokens[_cursorend] +1;
+			if (parse_parameter(paramTokens, param)) {
+				newComp.parameters.push_back(param);
+				_cursor = _cursorend+1;
+			}
+			else // error when parsing param
+			{
+				return false;
+			}
+		}
+	}
+	outC = newComp;
+	return true;
+}
 
 struct DocLine
 {
@@ -76,6 +198,14 @@ std::string to_unreal_type(const std::string& type_name)
 	{
 		return "float";
 	}
+	else if (type_name.compare("i32") == 0)
+	{
+		return "int32_t";
+	}
+	else if (type_name.compare("i64") == 0)
+	{
+		return "int64_t";
+	}
 	else if (type_name.compare("vec3") == 0)
 	{
 		return "FVector";
@@ -89,7 +219,19 @@ void write_parameter_unreal(const  Parameter& param, Document& outdc)
 	outdc.add_line("");
 	outdc.add_line("//newval -------");
 	outdc.add_line("UPROPERTY(EditAnywhere,BlueprintReadWrite,Category = Component)");
-	outdc.add_line(fmt::format("{} {};", to_unreal_type(param.type_name), param.name));
+	if (param.array_lenght == -1)
+	{
+		outdc.add_line(fmt::format("{} {};", to_unreal_type(param.type_name), param.name));
+	}
+	else if (param.array_lenght == 0)
+	{
+		outdc.add_line(fmt::format("TArray<{}> {};", to_unreal_type(param.type_name), param.name));
+	}
+	else //sized array
+	{
+		outdc.add_line(fmt::format("{} {}[{}];", to_unreal_type(param.type_name), param.name,param.array_lenght));
+	}
+	
 };
 
 void write_component(const Component& cmp, Document& outdc)
@@ -203,8 +345,31 @@ int main(int argc, char* argv[])
 {
 	std::vector<Component> component_table;
 
-	std::ifstream i("test_components.json");
+	//std::ifstream i("test_files/test_components.json");
+	std::ifstream i("test_files/basic_struct.txt");
 	if (i.is_open()) {
+
+		std::string str((std::istreambuf_iterator<char>(i)),
+			std::istreambuf_iterator<char>());
+
+		auto tokens = parse_string(str.c_str());
+		auto tokens2 = filter_comments(tokens);
+
+		std::vector<Token> copied_tokens;
+		for (auto tk : tokens2) {
+			print_token(tk);
+			copied_tokens.push_back(tk);
+		}
+
+		span<Token> cmptokens;
+		cmptokens._begin = copied_tokens.data();
+		cmptokens._end = copied_tokens.data() + copied_tokens.size();
+
+		Component comp;
+		parse_component(cmptokens, comp);
+
+		component_table.push_back(comp);
+#if 0
 		json j;
 		i >> j;
 
@@ -216,6 +381,9 @@ int main(int argc, char* argv[])
 
 
 		}
+
+		
+#endif
 
 		Document doc;
 

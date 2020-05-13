@@ -4,3 +4,6 @@
 [submodule "third_party/fmtlib"]
 	path = third_party/fmtlib
 	url = https://github.com/fmtlib/fmt
+[submodule "third_party/cppcoro"]
+	path = third_party/cppcoro
+	url = https://github.com/lewissbaker/cppcoro.git
