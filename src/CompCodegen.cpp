@@ -38,6 +38,12 @@ struct Parameter
 	int array_lenght = -1;
 };
 
+bool has_metadata(std::string metadata,const Parameter& param)
+{
+	auto it = param.metadata.find(metadata);
+	return it != param.metadata.end();
+}
+
 struct Component
 {
 	std::vector<Parameter> parameters;
@@ -203,33 +209,37 @@ bool parse_component(span<Token> tokens, Component& outC) {
 
 	newComp.name = std::string_view{ compname.str.ptr,compname.str.size };
 
-	//cut the parameter token streams
-	int _cursor = 3;
-	while (tokens[_cursor].type != TokenType::CURLY_BRACKET_CLOSE) {
-		int _cursorend = -1;
-		//find next comma
-		for (int i = _cursor; i < tokens.size(); i++) {
+	//an empty component has exactly 4 tokens
+	if (tokens.size() > 4) {
 
-			//end of comp
-			if (tokens[i].type == TokenType::SEMICOLON)
-			{
-				_cursorend = i;
-				break;
-			}
-		}
-		if (_cursorend > _cursor) {
-			Parameter param;
+		//cut the parameter token streams
+		int _cursor = 3;
+		while (tokens[_cursor].type != TokenType::CURLY_BRACKET_CLOSE) {
+			int _cursorend = -1;
+			//find next comma
+			for (int i = _cursor; i < tokens.size(); i++) {
 
-			span<Token> paramTokens;
-			paramTokens._begin = &tokens[_cursor];
-			paramTokens._end = &tokens[_cursorend] +1;
-			if (parse_parameter(paramTokens, param)) {
-				newComp.parameters.push_back(param);
-				_cursor = _cursorend+1;
+				//end of comp
+				if (tokens[i].type == TokenType::SEMICOLON)
+				{
+					_cursorend = i;
+					break;
+				}
 			}
-			else // error when parsing param
-			{
-				return false;
+			if (_cursorend > _cursor) {
+				Parameter param;
+
+				span<Token> paramTokens;
+				paramTokens._begin = &tokens[_cursor];
+				paramTokens._end = &tokens[_cursorend] + 1;
+				if (parse_parameter(paramTokens, param)) {
+					newComp.parameters.push_back(param);
+					_cursor = _cursorend + 1;
+				}
+				else // error when parsing param
+				{
+					return false;
+				}
 			}
 		}
 	}
@@ -391,7 +401,7 @@ void write_component_unreal(const Component& cmp, Document& outdc)
 	outdc.add_line("}");
 };
 
-void write_imgui_param(const Parameter& param, Document& outdc)
+void write_imgui_param(Parameter& param, Document& outdc)
 {
 	outdc.add_line("");
 	outdc.add_line("//edit -------");
@@ -399,7 +409,22 @@ void write_imgui_param(const Parameter& param, Document& outdc)
 	std::string name_quoted = quoted(param.name);
 	if (param.type_name.compare("f32") == 0)
 	{	
-		outdc.add_line(fmt::format("ImGui::InputFloat({},&component.{});", name_quoted, param.name));
+		if (has_metadata("slider_min", param) && has_metadata("slider_max", param))
+		{
+			float slider_min = param.metadata["slider_min"].float_md;
+			float slider_max = param.metadata["slider_max"].float_md;
+			outdc.add_line(fmt::format("ImGui::SliderFloat({},&component.{},{},{});", name_quoted, param.name, slider_min, slider_max));
+		}
+		else
+		{
+			outdc.add_line(fmt::format("ImGui::InputFloat({},&component.{});", name_quoted, param.name));
+		}
+		
+	}
+	else if (param.type_name.compare("i32") == 0)
+	{
+		
+		outdc.add_line(fmt::format("ImGui::InputInt({},&component.{});", name_quoted, param.name));
 	}
 	else if (param.type_name.compare("vec3") == 0)
 	{
@@ -412,7 +437,7 @@ void write_imgui_param(const Parameter& param, Document& outdc)
 
 };
 
-void write_imgui_edit(const Component& cmp, Document& outdc)
+void write_imgui_edit( Component& cmp, Document& outdc)
 {
 	outdc.add_line("//editor");
 	outdc.add_line(fmt::format("void imgui_edit_comp_{type}(const {type} &component) {{", "type"_a = cmp.name));
@@ -463,6 +488,33 @@ void output_document(Stream& stream, Document& doc)
 	}
 };
 
+template<typename F>
+void split_structs(span<Token> tokens, F&& fn) {
+	int start = 0;
+	int end = 0;
+
+	for (int i = 0; i < tokens.size()-2; i++) {
+
+		//find "struct" declaration, <struct> <name> <{>
+		if (tokens[i].type == TokenType::KEYWORD && tokens[i+1].type == TokenType::STRING && tokens[i + 2].type == TokenType::CURLY_BRACKET_OPEN)
+		{
+			//find the closing brace
+			for (int j = i+3; j < tokens.size(); j++) 
+			{
+				if (tokens[j].type == TokenType::CURLY_BRACKET_CLOSE)
+				{
+					span<Token> segment;
+					segment._begin = tokens._begin + i;
+					segment._end = tokens._begin + j;
+					fn(segment);
+					break;
+				}
+			}
+		}
+	}
+
+}
+
 int main(int argc, char* argv[])
 {
 	std::vector<Component> component_table;
@@ -487,10 +539,16 @@ int main(int argc, char* argv[])
 		cmptokens._begin = copied_tokens.data();
 		cmptokens._end = copied_tokens.data() + copied_tokens.size();
 
-		Component comp;
-		parse_component(cmptokens, comp);
+		split_structs(cmptokens, [&](span<Token> structtokens) {
+			Component comp;
+			if (parse_component(structtokens, comp))
+			{
+				component_table.push_back(comp);
+			}
+			
+		});
 
-		component_table.push_back(comp);
+		
 #if 0
 		json j;
 		i >> j;

@@ -6,3 +6,13 @@ z:i64[];
 zarray:i64[42];
 //comment g:;asf542w
 }
+
+struct MyComponent2{
+
+y2 : f32 = 50.f #[ slider_min = -0.5f, slider_max=1.5];
+
+}
+struct MyComponent3{
+//comment g:;asf542w
+
+}
