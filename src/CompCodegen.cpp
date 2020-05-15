@@ -50,24 +50,28 @@ struct Component
 	std::string name;
 };
 
-template<typename T>
-struct span {
-	T* _end;
-	T* _begin;
 
-	T& operator[](size_t idx)
-	{
-		return _begin[idx];
-	}
+template<typename F>
+void split_iterate(span<Token> tokens, SymbolType splitType, F&& fn) {
+	int start = 0;
+	int end = 0;
 
-	T& back() {
-		return *(_end - 1);
+	for (int i = 0; i < tokens.size(); i++) {
+		if (check_token_symbol(tokens,i,splitType)){
+			end = i;
+			span<Token> segment;
+			segment._begin = tokens._begin + start;
+			segment._end = tokens._begin + end;
+			fn(segment);
+			start = i + 1;
+		}
 	}
+	span<Token> segment;
+	segment._begin = tokens._begin + start;
+	segment._end = tokens._begin + tokens.size();
+	fn(segment);
+}
 
-	size_t size() {
-		return _end - _begin;
-	}
-};
 
 template<typename F>
 void split_iterate(span<Token> tokens, TokenType splitType, F&& fn) {
@@ -96,36 +100,32 @@ void split_iterate(span<Token> tokens, TokenType splitType, F&& fn) {
 //<array> = nothing
 //<array> = <open sqbracket> <int> <close sqbracket>
 bool parse_parameter(span<Token> tokens, Parameter& outC) {
+#if 1
+	if(!check_token_symbol(tokens,tokens.size()-1,SymbolType::SEMICOLON))return false;
+	
 
-	if(tokens.back().type != TokenType::SEMICOLON)return false;
+	if (!check_token_chain<3>(tokens, 0, { TokenType::IDENTIFIER ,TokenType::SYMBOL ,TokenType::IDENTIFIER })) return false;
+	
 
-	Token name = tokens[0];
+	if (!check_token_symbol(tokens, 1, SymbolType::COLON)) return false;
 
-	if (name.type != TokenType::STRING) return false;
-
-	Token colon = tokens[1];
-
-	if (colon.type != TokenType::COLON) return false;
-
-	Token ptype = tokens[2];
-
-	if (ptype.type != TokenType::STRING) return false;
-
-	//array handling
-	if (tokens[3].type == TokenType::SQUARE_BRACKET_OPEN)
+	//array parsing
+	if (check_token_symbol(tokens, 3, SymbolType::SQUARE_BRACKET_OPEN))
 	{
-		//unsized array
-		if (tokens[4].type == TokenType::SQUARE_BRACKET_CLOSE)
+		bool bUnsizedArray = check_token_symbol(tokens, 3, SymbolType::SQUARE_BRACKET_OPEN) && check_token_symbol(tokens, 4, SymbolType::SQUARE_BRACKET_CLOSE);
+
+		bool bSizedArray = check_token_chain<3>(tokens, 3, { TokenType::SYMBOL ,TokenType::INT_LITERAL ,TokenType::SYMBOL });
+
+		bSizedArray = bSizedArray && check_token_symbol(tokens, 3, SymbolType::SQUARE_BRACKET_OPEN) && check_token_symbol(tokens, 5, SymbolType::SQUARE_BRACKET_CLOSE);
+
+		if (bUnsizedArray)
 		{
 			outC.array_lenght = 0;
 		}
-		//array size
-		else if (tokens[4].type == TokenType::INT_LITERAL &&  (tokens[5].type == TokenType::SQUARE_BRACKET_CLOSE))
-		{
+		else if (bSizedArray) {
 			outC.array_lenght = tokens[4].int_literal;
 		}
-		else
-		{
+		else {
 			return false;
 		}
 	}
@@ -134,11 +134,11 @@ bool parse_parameter(span<Token> tokens, Parameter& outC) {
 	int mt_start = -1;
 	int mt_end = -1;
 	for (int i = 0; i < tokens.size(); i++) {
-		if (tokens[i].type == TokenType::REFLINFO_BEGIN)
+		if (check_symbol_chain<2>(tokens, i, { SymbolType::HASH ,SymbolType::SQUARE_BRACKET_OPEN }) )
 		{
-			mt_start = i;
+			mt_start = i+1;
 		}
-		else if (tokens[i].type == TokenType::REFLINFO_END)
+		else if (check_token_symbol(tokens, i, SymbolType::SQUARE_BRACKET_CLOSE))
 		{
 			mt_end = i;
 		}
@@ -152,15 +152,15 @@ bool parse_parameter(span<Token> tokens, Parameter& outC) {
 		std::unordered_map<std::string, Metadata> metadata;
 
 		//2 options, either <string> <equals> <literal> or <string>
-		split_iterate(segment, TokenType::COMMA, [&metadata](span<Token> tks) {
-			if (tks[0].type == TokenType::STRING)
+		split_iterate(segment, SymbolType::COMMA, [&metadata](span<Token> tks) {
+			if (tks[0].type == TokenType::IDENTIFIER)
 			{
 				if (tks.size() == 1) {
 					Metadata mt;
 					mt.type = MetadataType::NONE;
 					metadata[std::string(tks[0].view())] = mt;
 				}
-				else if (tks.size() == 3 && tks[1].type == TokenType::EQUALS) {
+				else if (tks.size() == 3 && check_token_symbol(tks, 1, SymbolType::EQUALS)) {
 					Metadata mt;
 					
 
@@ -186,9 +186,9 @@ bool parse_parameter(span<Token> tokens, Parameter& outC) {
 
 
 	//no literal handling yet
-	outC.name = std::string_view{ name.str.ptr,name.str.size };
-	outC.type_name = std::string_view{ ptype.str.ptr,ptype.str.size };
-
+	outC.name = std::string_view{ tokens[0].str.ptr,tokens[0].str.size };
+	outC.type_name = std::string_view{ tokens[2].str.ptr,tokens[2].str.size };
+#endif
 	return true;
 }
 
@@ -196,16 +196,16 @@ bool parse_parameter(span<Token> tokens, Parameter& outC) {
 //<inner> = array<parameter>
 
 bool parse_component(span<Token> tokens, Component& outC) {
-	
+
 	Component newComp;
 
-	if (tokens[0].type != TokenType::KEYWORD) return false;
+	if (!check_token(tokens, 0, TokenType::KEYWORD) ) return false;
 
 	Token compname = tokens[1];
 
-	if (compname.type != TokenType::STRING) return false;
+	if (!check_token(tokens, 1, TokenType::IDENTIFIER)) return false;
 
-	if (tokens[2].type != TokenType::CURLY_BRACKET_OPEN) return false;
+	if (!check_token_symbol(tokens, 2, SymbolType::CURLY_BRACKET_OPEN)) return false;
 
 	newComp.name = std::string_view{ compname.str.ptr,compname.str.size };
 
@@ -214,13 +214,13 @@ bool parse_component(span<Token> tokens, Component& outC) {
 
 		//cut the parameter token streams
 		int _cursor = 3;
-		while (tokens[_cursor].type != TokenType::CURLY_BRACKET_CLOSE) {
+		while (true) {
 			int _cursorend = -1;
 			//find next comma
 			for (int i = _cursor; i < tokens.size(); i++) {
 
 				//end of comp
-				if (tokens[i].type == TokenType::SEMICOLON)
+				if (check_token_symbol(tokens, i, SymbolType::SEMICOLON))
 				{
 					_cursorend = i;
 					break;
@@ -241,9 +241,14 @@ bool parse_component(span<Token> tokens, Component& outC) {
 					return false;
 				}
 			}
+			else
+			{
+				break;
+			}
 		}
 	}
 	outC = newComp;
+
 	return true;
 }
 
@@ -496,20 +501,25 @@ void split_structs(span<Token> tokens, F&& fn) {
 	for (int i = 0; i < tokens.size()-2; i++) {
 
 		//find "struct" declaration, <struct> <name> <{>
-		if (tokens[i].type == TokenType::KEYWORD && tokens[i+1].type == TokenType::STRING && tokens[i + 2].type == TokenType::CURLY_BRACKET_OPEN)
+		//if (check_token(tokens,i,TokenType::KEYWORD) && tokens[i+1].type == TokenType::IDENTIFIER && tokens[i + 2].type == TokenType::CURLY_BRACKET_OPEN)
+		if (check_token(tokens, i, TokenType::KEYWORD) && check_token(tokens, i+1, TokenType::IDENTIFIER))
 		{
-			//find the closing brace
-			for (int j = i+3; j < tokens.size(); j++) 
+			if (check_token_symbol(tokens, i + 2, SymbolType::CURLY_BRACKET_OPEN))
 			{
-				if (tokens[j].type == TokenType::CURLY_BRACKET_CLOSE)
+				//find the closing brace
+				for (int j = i + 3; j < tokens.size(); j++)
 				{
-					span<Token> segment;
-					segment._begin = tokens._begin + i;
-					segment._end = tokens._begin + j;
-					fn(segment);
-					break;
+					if (check_token_symbol(tokens, j, SymbolType::CURLY_BRACKET_CLOSE))
+					{
+						span<Token> segment;
+						segment._begin = tokens._begin + i;
+						segment._end = tokens._begin + j+1;
+						fn(segment);
+						break;
+					}
 				}
 			}
+			
 		}
 	}
 
@@ -544,8 +554,7 @@ int main(int argc, char* argv[])
 			if (parse_component(structtokens, comp))
 			{
 				component_table.push_back(comp);
-			}
-			
+			}			
 		});
 
 		
