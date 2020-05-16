@@ -2,211 +2,20 @@
 #include <cppcoro/generator.hpp>
 #include <iostream>
 #include <charconv>
+#include "tokenizer_types.h"
 
-template<typename T>
-struct span {
-	T* _end;
-	T* _begin;
-
-	T& operator[](size_t idx)
-	{
-		return _begin[idx];
-	}
-
-	T& back() {
-		return *(_end - 1);
-	}
-
-	size_t size() {
-		return _end - _begin;
-	}
-};
-enum class TokenType : char {
-	IDENTIFIER,
-	KEYWORD,
-	
-	COMMENT,
-	
-	FLOAT_LITERAL,
-	INT_LITERAL,
-	STRING_LITERAL,
-	SYMBOL,
-	//EQUALS,
-	//SEMICOLON,
-	//COMMA,
-	//COLON,
-	//CURLY_BRACKET_OPEN,
-	//CURLY_BRACKET_CLOSE,
-	//SQUARE_BRACKET_OPEN,
-	//SQUARE_BRACKET_CLOSE,
-	//REFLINFO_BEGIN,
-	//REFLINFO_END,
-	NONE
-}; 
-
-enum class SymbolType :char {
-	EQUALS,
-	SEMICOLON,
-	COMMA,
-	COLON,
-	CURLY_BRACKET_OPEN,
-	CURLY_BRACKET_CLOSE,
-	SQUARE_BRACKET_OPEN,
-	SQUARE_BRACKET_CLOSE,
-	MINUS,
-	PLUS,
-	DOT,
-	HASH,
-	NONE
-};
-
-struct SymbolDefinition {
-	SymbolType type;
-	const char* symbol;
-};
-
-const SymbolDefinition symbol_list[]{
-	{SymbolType::EQUALS,"="},
-	{SymbolType::SEMICOLON,";"},
-	{SymbolType::COMMA,","},
-	{SymbolType::COLON,":"},
-	{SymbolType::CURLY_BRACKET_OPEN,"{"},
-	{SymbolType::CURLY_BRACKET_CLOSE,"}"},
-	{SymbolType::SQUARE_BRACKET_OPEN,"["},
-	{SymbolType::SQUARE_BRACKET_CLOSE,"]"},
-	{SymbolType::HASH,"#"},
-	{SymbolType::MINUS,"-"},
-	{SymbolType::PLUS,"+"},
-	{SymbolType::DOT,"."}
-};
-
-std::string to_string(SymbolType ttype)
-{
-	switch (ttype)
-	{
-	case SymbolType::SEMICOLON:
-		return "SEMICOLON";
-		break;
-	case SymbolType::EQUALS:
-		return "EQUALS";
-		break;
-	case SymbolType::COLON:
-		return "COLON";
-		break;
-	case SymbolType::CURLY_BRACKET_OPEN:
-		return "CURLY BRACKET OPEN";
-		break;
-	case SymbolType::CURLY_BRACKET_CLOSE:
-		return "CURLY BRACKET CLOSE";
-		break;
-	case SymbolType::SQUARE_BRACKET_OPEN:
-		return "SQUARE BRACKET OPEN";
-		break;
-	case SymbolType::SQUARE_BRACKET_CLOSE:
-		return "SQUARE BRACKET CLOSE";
-		break;
-	case SymbolType::MINUS:
-		return "MINUS";
-		break;
-	case SymbolType::PLUS:
-		return "PLUS";
-		break;
-	case SymbolType::DOT:
-		return "DOT";
-		break;
-	case SymbolType::HASH:
-		return "HASH";
-		break;
-	case SymbolType::COMMA:
-		return "COMMA";
-		break;
-	
-	default:
-		return "ERROR";
-		break;
-	}
-}
-std::string to_string(TokenType ttype) {
-	switch (ttype)
-	{
-	case TokenType::IDENTIFIER:
-		return "STRING";
-		break;
-	case TokenType::KEYWORD:
-		return "KEYWORD";
-		break;
-	
-	case TokenType::COMMENT:
-		return "COMMENT";
-		break;
-	
-	case TokenType::FLOAT_LITERAL:
-		return "FLOAT";
-		break;
-	case TokenType::INT_LITERAL:
-		return "INT";
-		break;
-	case TokenType::SYMBOL:
-		return "SYMBOL";
-		break;
-	case TokenType::STRING_LITERAL:
-		return "STRING LITERAL";
-		break;
-	default:
-		return "ERROR";
-		break;
-	}
-}
-
-enum class CharacterType : char {
-	SPACE,
-	CURLY_BRACKET_OPEN,
-	CURLY_BRACKET_CLOSE,
-	SQUARE_BRACKET_OPEN,
-	SQUARE_BRACKET_CLOSE,
-	LETTER,
-	DIGIT,
-	SLASH,
-	SEMICOLON,
-	COLON,
-	DOT,
-	NEWLINE,
-	EQUALS,
-	HASH,
-	COMMA,
-	PLUS,
-	MINUS,
-	OTHER
-};
-
-struct StringView {
-	const char* ptr;
-	size_t size;
-};
-
-struct Token {
-
-	union{
-		
-		SymbolType symbol;
-		float float_literal;
-		int int_literal;
-	};
-	StringView str;
-	TokenType type;
-
-	std::string_view view() {
-		return std::string_view{ str.ptr,str.size };
-	}
-};
 
 #include<stdio.h>
 #include<ctype.h>
-bool is_letter(char character) {
+
+
+using TokenStream = cppcoro::generator<Token>;
+
+inline bool is_letter(char character) {
 
 	return isalpha(character);
 }
-bool is_number(char character) {
+inline bool is_number(char character) {
 	return character >= '0' && character < '9';
 }
 
@@ -217,7 +26,7 @@ const std::string keyword_list[] = {
 	//"i32"
 };
 
-bool is_keyword(std::string_view str) {
+inline bool is_keyword(std::string_view str) {
 	for (auto s : keyword_list) {
 		if (s.compare(str) == 0) {
 			return true;
@@ -225,7 +34,7 @@ bool is_keyword(std::string_view str) {
 	}
 	return false;
 }
-Token build_token(TokenType type, const char* start, const char* end) {
+inline Token build_token(TokenType type, const char* start, const char* end) {
 	Token tk;
 
 	tk.type = type;
@@ -274,7 +83,7 @@ Token build_token(TokenType type, const char* start, const char* end) {
 	return tk;
 }
 
-CharacterType get_type(char character) {
+inline CharacterType get_type(char character) {
 	if (is_letter(character)) return CharacterType::LETTER;
 	if (is_number(character)) return CharacterType::DIGIT;
 	switch (character) {
@@ -299,7 +108,7 @@ CharacterType get_type(char character) {
 	return CharacterType::OTHER;
 }
 
-bool is_string_stop_character(char character) {
+inline bool is_string_stop_character(char character) {
 	CharacterType ctype = get_type(character);
 
 	switch (ctype) {
@@ -347,7 +156,7 @@ bool is_string_stop_character(char character) {
 //	}
 //}
 
-bool char_to_symbol(char c, SymbolType& outType) {
+inline bool char_to_symbol(char c, SymbolType& outType) {
 
 	for (auto sy : symbol_list) {
 		if (*sy.symbol == c)
@@ -359,7 +168,7 @@ bool char_to_symbol(char c, SymbolType& outType) {
 	return false;
 }
 
-bool check_token(span<Token> tokens, int index, TokenType type)
+inline bool check_token(span<Token> tokens, int index, TokenType type)
 {
 	return index < tokens.size() && tokens[index].type == type;
 }
@@ -378,8 +187,11 @@ bool check_token_chain(span<Token> tokens, int first, const std::array<TokenType
 }
 
 
-
-bool check_token_symbol(span<Token> tokens, int index, SymbolType type)
+inline bool check_token_symbol(const Token& tokens, SymbolType type)
+{
+	return tokens.type == TokenType::SYMBOL && tokens.symbol == type;
+}
+inline bool check_token_symbol(span<Token> tokens, int index, SymbolType type)
 {
 	return tokens[index].type == TokenType::SYMBOL && tokens[index].symbol == type;
 }
@@ -397,7 +209,7 @@ bool check_symbol_chain(span<Token> tokens, int first, const std::array<SymbolTy
 	return true;
 }
 
-cppcoro::generator<Token> parse_string(const char* pars) {
+inline TokenStream parse_string(const char* pars) {
 
 	bool bInsideReflectionBlock = false;
 	while (*pars) {
@@ -515,7 +327,7 @@ cppcoro::generator<Token> parse_string(const char* pars) {
 
 	co_return;
 }
-cppcoro::generator<Token> filter_comments(cppcoro::generator<Token>& tokens)
+inline TokenStream filter_comments(TokenStream& tokens)
 {
 	for (auto tk : tokens) {
 		if (tk.type != TokenType::COMMENT)
@@ -526,7 +338,7 @@ cppcoro::generator<Token> filter_comments(cppcoro::generator<Token>& tokens)
 	co_return;
 }
 
-void print_token(const Token& token) {
+inline void print_token(const Token& token) {
 	std::string_view stv{ token.str.ptr,token.str.size };
 
 	switch (token.type)
@@ -542,4 +354,47 @@ void print_token(const Token& token) {
 		fmt::print("{} :: {} \n", to_string(token.type), stv);
 		break;
 	}
+}
+
+template<typename F>
+void split_iterate(span<Token> tokens, SymbolType splitType, F&& fn) {
+	int start = 0;
+	int end = 0;
+
+	for (int i = 0; i < tokens.size(); i++) {
+		if (check_token_symbol(tokens, i, splitType)) {
+			end = i;
+			span<Token> segment;
+			segment._begin = tokens._begin + start;
+			segment._end = tokens._begin + end;
+			fn(segment);
+			start = i + 1;
+		}
+	}
+	span<Token> segment;
+	segment._begin = tokens._begin + start;
+	segment._end = tokens._begin + tokens.size();
+	fn(segment);
+}
+
+
+template<typename F>
+void split_iterate(span<Token> tokens, TokenType splitType, F&& fn) {
+	int start = 0;
+	int end = 0;
+
+	for (int i = 0; i < tokens.size(); i++) {
+		if (tokens[i].type == splitType) {
+			end = i;
+			span<Token> segment;
+			segment._begin = tokens._begin + start;
+			segment._end = tokens._begin + end;
+			fn(segment);
+			start = i + 1;
+		}
+	}
+	span<Token> segment;
+	segment._begin = tokens._begin + start;
+	segment._end = tokens._begin + tokens.size();
+	fn(segment);
 }

@@ -4,7 +4,7 @@
 #include "CompCodegen.h"
 
 
-#include "nlohmann/json.hpp"
+//#include "nlohmann/json.hpp"
 #include "fmt/format.h"
 #include <fstream> 
 #include <string>
@@ -13,36 +13,15 @@
 
 #include "tokenizer.h"
 #include <sstream>
-using json = nlohmann::json;
+#include "parser_types.h"
+#include "parser.h"
+
+#include "document_output.h"
+//using json = nlohmann::json;
 using namespace fmt::literals;
 
-enum class MetadataType : char{
-	FLOAT,
-	INT,
-	STRING,
-	NONE
-};
 
-struct Metadata {
-	union {
-		float float_md;
-		int int_md;
-	};
-	MetadataType type;
-};
-struct Parameter
-{
-	std::unordered_map<std::string, Metadata> metadata;
-	std::string name;
-	std::string type_name;
-	int array_lenght = -1;
-};
 
-bool has_metadata(std::string metadata,const Parameter& param)
-{
-	auto it = param.metadata.find(metadata);
-	return it != param.metadata.end();
-}
 
 struct Component
 {
@@ -51,48 +30,7 @@ struct Component
 };
 
 
-template<typename F>
-void split_iterate(span<Token> tokens, SymbolType splitType, F&& fn) {
-	int start = 0;
-	int end = 0;
 
-	for (int i = 0; i < tokens.size(); i++) {
-		if (check_token_symbol(tokens,i,splitType)){
-			end = i;
-			span<Token> segment;
-			segment._begin = tokens._begin + start;
-			segment._end = tokens._begin + end;
-			fn(segment);
-			start = i + 1;
-		}
-	}
-	span<Token> segment;
-	segment._begin = tokens._begin + start;
-	segment._end = tokens._begin + tokens.size();
-	fn(segment);
-}
-
-
-template<typename F>
-void split_iterate(span<Token> tokens, TokenType splitType, F&& fn) {
-	int start = 0;
-	int end = 0;
-
-	for (int i = 0; i < tokens.size(); i++) {
-		if (tokens[i].type == splitType) {
-			end = i;
-			span<Token> segment;
-			segment._begin = tokens._begin + start;
-			segment._end = tokens._begin + end;
-			fn(segment);
-			start = i + 1;
-		}	
-	}
-	span<Token> segment;
-	segment._begin = tokens._begin + start;
-	segment._end = tokens._begin + tokens.size();
-	fn(segment);
-}
 
 //<parameter> = <name> <:> <type> <array> <default> <comma>
 //<default> = nothing
@@ -252,41 +190,25 @@ bool parse_component(span<Token> tokens, Component& outC) {
 	return true;
 }
 
-struct DocLine
-{
-	std::string line;
-	int indent;
-};
-struct Document
-{
-	std::vector<DocLine> lines;
-
-	int current_indent{ 0 };
-
-	void add_line(std::string line)
-	{
-		lines.push_back({ line,current_indent });
-	}
-};
 
 
-Component parse_component(std::string_view name, const json& in_object)
-{
-	Component cmp;
-
-	cmp.name = name;
-
-	for (auto& [name, obj] : in_object["variables"].items())
-	{
-		Parameter newParam;
-
-		newParam.name = name;
-		newParam.type_name = obj;
-		cmp.parameters.push_back(newParam);
-	}
-
-	return cmp;
-};
+//Component parse_component(std::string_view name, const json& in_object)
+//{
+//	Component cmp;
+//
+//	cmp.name = name;
+//
+//	for (auto& [name, obj] : in_object["variables"].items())
+//	{
+//		Parameter newParam;
+//
+//		newParam.name = name;
+//		newParam.type_name = obj;
+//		cmp.parameters.push_back(newParam);
+//	}
+//
+//	return cmp;
+//};
 
 void write_parameter(const  Parameter& param, Document& outdc)
 {
@@ -295,9 +217,6 @@ void write_parameter(const  Parameter& param, Document& outdc)
 	outdc.add_line(fmt::format("{} {};",param.type_name, param.name));
 };
 
-std::string quoted(const std::string& original) {
-	return fmt::format("\"{}\"",original);
-}
 
 std::string to_unreal_type(const std::string& type_name)
 {
@@ -375,7 +294,7 @@ void write_component(const Component& cmp, Document& outdc)
 {
 	outdc.add_line("");
 	outdc.add_line("//component-------");
-	outdc.add_line(fmt::format("struct {} {",cmp.name));
+	outdc.add_line(fmt::format("struct {} {{",cmp.name));
 	outdc.current_indent++;
 	for (auto& p : cmp.parameters)
 	{
@@ -406,55 +325,20 @@ void write_component_unreal(const Component& cmp, Document& outdc)
 	outdc.add_line("}");
 };
 
-void write_imgui_param(Parameter& param, Document& outdc)
-{
-	outdc.add_line("");
-	outdc.add_line("//edit -------");
-
-	std::string name_quoted = quoted(param.name);
-	if (param.type_name.compare("f32") == 0)
-	{	
-		if (has_metadata("slider_min", param) && has_metadata("slider_max", param))
-		{
-			float slider_min = param.metadata["slider_min"].float_md;
-			float slider_max = param.metadata["slider_max"].float_md;
-			outdc.add_line(fmt::format("ImGui::SliderFloat({},&component.{},{},{});", name_quoted, param.name, slider_min, slider_max));
-		}
-		else
-		{
-			outdc.add_line(fmt::format("ImGui::InputFloat({},&component.{});", name_quoted, param.name));
-		}
-		
-	}
-	else if (param.type_name.compare("i32") == 0)
-	{
-		
-		outdc.add_line(fmt::format("ImGui::InputInt({},&component.{});", name_quoted, param.name));
-	}
-	else if (param.type_name.compare("vec3") == 0)
-	{
-		outdc.add_line(fmt::format("ImGui::InputFloat3({},&component.{}[0]);", name_quoted, param.name));
-	}
-	else
-	{
-		outdc.add_line(fmt::format("// parameter {} not editable", param.name));
-	}
-
-};
 
 void write_imgui_edit( Component& cmp, Document& outdc)
 {
-	outdc.add_line("//editor");
-	outdc.add_line(fmt::format("void imgui_edit_comp_{type}(const {type} &component) {{", "type"_a = cmp.name));
-	outdc.current_indent++;
-
-	for (auto& p : cmp.parameters)
-	{
-		write_imgui_param(p, outdc);
-	}
-
-	outdc.current_indent--;
-	outdc.add_line("}");
+	//outdc.add_line("//editor");
+	//outdc.add_line(fmt::format("void imgui_edit_comp_{type}(const {type} &component) {{", "type"_a = cmp.name));
+	//outdc.current_indent++;
+	//
+	//for (auto& p : cmp.parameters)
+	//{
+	//	write_imgui_param(p, outdc);
+	//}
+	//
+	//outdc.current_indent--;
+	//outdc.add_line("}");
 }
 
 void write_entt_edit(std::vector<Component>& components, Document& outdc)
@@ -518,8 +402,7 @@ void split_structs(span<Token> tokens, F&& fn) {
 						break;
 					}
 				}
-			}
-			
+			}			
 		}
 	}
 
@@ -536,8 +419,35 @@ int main(int argc, char* argv[])
 		std::string str((std::istreambuf_iterator<char>(i)),
 			std::istreambuf_iterator<char>());
 
+		Module schema;
+		schema.initialize_default_types();
+		{
+			auto tokens = parse_string(str.c_str());
+			auto tokens2 = filter_comments(tokens);
+
+			parse_stream(tokens2, &schema);
+
+			Document header;
+			Document source;
+
+			header.name = "comps.generated.h";
+			source.name = "comps.generated.cpp";
+
+			OutputOptions outputOptions;
+			output_module(&schema, header, source, outputOptions);
+
+			std::ofstream fheader("test_files/" + header.name);
+			std::ofstream fsource("test_files/" + source.name);
+
+			output_document(fheader, header);
+			output_document(fsource, source);
+		}
+
+#if 0
+
 		auto tokens = parse_string(str.c_str());
 		auto tokens2 = filter_comments(tokens);
+
 
 		std::vector<Token> copied_tokens;
 		for (auto tk : tokens2) {
@@ -557,29 +467,12 @@ int main(int argc, char* argv[])
 			}			
 		});
 
-		
-#if 0
-		json j;
-		i >> j;
-
-		auto complist = j["component_definitions"];
-		for (auto& [name, obj] : complist.items())
-		{
-			Component cmp = parse_component(name, complist[name]);
-			component_table.push_back(cmp);
-
-
-		}
-
-		
-#endif
-
-		Document doc;
+				Document doc;
 
 		for (auto& c : component_table)
 		{
-			//write_component(c,doc);
-			write_component_unreal(c, doc);
+			write_component(c,doc);
+			//write_component_unreal(c, doc);
 		}
 
 		for (auto& c : component_table)
@@ -591,8 +484,9 @@ int main(int argc, char* argv[])
 		write_entt_edit(component_table, doc);
 
 		output_document(std::cout, doc);
+
+#endif
 	}
-	
 
 	return 0;
 }
