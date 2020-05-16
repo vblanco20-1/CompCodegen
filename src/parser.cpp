@@ -7,7 +7,9 @@ bool parse_struct(StructDefinition* definition, Module* mod);
 
 
 StructDefinition* allocateStruct(Module* mod, std::string_view real_name, bool b_default_type = false) {
-	StructDefinition* new_struct = new StructDefinition();
+
+	mod->structs.push_back(StructDefinition{});
+	StructDefinition* new_struct = &mod->structs.back();
 	new_struct->real_name = real_name;
 	new_struct->owner = mod;
 	new_struct->bIsDefault = b_default_type;

@@ -7,7 +7,7 @@ set (CMAKE_CXX_STANDARD 20)
 add_compile_options("/await")
 
 # Add source to this project's executable.
-add_executable (CompCodegen "CompCodegen.cpp" "CompCodegen.h" "document_output.h" "document_output.cpp" "tokenizer.h" "tokenizer_types.h" "parser_types.h" "parser.h" "parser.cpp")
+add_executable (CompCodegen "CompCodegen.cpp" "CompCodegen.h" "document_output.h" "document_output.cpp" "paged_vector.h" "tokenizer.h" "tokenizer_types.h" "parser_types.h" "parser.h" "parser.cpp")
 set_property(TARGET CompCodegen PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
 

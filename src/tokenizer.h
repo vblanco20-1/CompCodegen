@@ -398,3 +398,4 @@ void split_iterate(span<Token> tokens, TokenType splitType, F&& fn) {
 	segment._end = tokens._begin + tokens.size();
 	fn(segment);
 }
+

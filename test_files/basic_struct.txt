@@ -16,3 +16,8 @@ struct MyComponent3{
 //comment g:;asf542w
 
 }
+
+struct MyComponent4{
+comp:MyComponent;
+
+}

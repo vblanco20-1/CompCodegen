@@ -25,8 +25,6 @@ void write_struct_parameter(const  Parameter& param, Document& outdc)
 	{
 		outdc.add_line(fmt::format("{} {}[{}];", param.type->real_name, param.name, param.array_lenght));
 	}
-
-
 };
 
 void write_struct(StructDefinition* stc, Document& outdc)
@@ -45,44 +43,56 @@ void write_struct(StructDefinition* stc, Document& outdc)
 std::string quoted(const std::string& original) {
 	return fmt::format("\"{}\"", original);
 }
+std::string get_imgui_edit_name(StructDefinition* stc) {
+	return fmt::format("void imgui_edit_comp_{}({} &component)", stc->real_name, stc->real_name);
+}
+
+
 void write_imgui_param(Parameter& param, Document& outdc)
 {
 	outdc.add_line("");
 	outdc.add_line("//edit -------");
 
 	std::string name_quoted = quoted(param.name);
-	if (param.type_name.compare("f32") == 0)
+	if (param.type->bIsDefault)
 	{
-		if (has_metadata("slider_min", param) && has_metadata("slider_max", param))
+		if (param.type_name.compare("f32") == 0)
 		{
-			float slider_min = param.metadata["slider_min"].float_md;
-			float slider_max = param.metadata["slider_max"].float_md;
-			outdc.add_line(fmt::format("ImGui::SliderFloat({},&component.{},{},{});", name_quoted, param.name, slider_min, slider_max));
+			if (has_metadata("slider_min", param) && has_metadata("slider_max", param))
+			{
+				float slider_min = param.metadata["slider_min"].float_md;
+				float slider_max = param.metadata["slider_max"].float_md;
+				outdc.add_line(fmt::format("ImGui::SliderFloat({},&component.{},{},{});", name_quoted, param.name, slider_min, slider_max));
+			}
+			else
+			{
+				outdc.add_line(fmt::format("ImGui::InputFloat({},&component.{});", name_quoted, param.name));
+			}
+
+		}
+		else if (param.type_name.compare("i32") == 0)
+		{
+
+			outdc.add_line(fmt::format("ImGui::InputInt({},&component.{});", name_quoted, param.name));
+		}
+		else if (param.type_name.compare("vec3") == 0)
+		{
+			outdc.add_line(fmt::format("ImGui::InputFloat3({},&component.{}[0]);", name_quoted, param.name));
 		}
 		else
 		{
-			outdc.add_line(fmt::format("ImGui::InputFloat({},&component.{});", name_quoted, param.name));
+			outdc.add_line(fmt::format("// parameter {} not editable", param.name));
 		}
-
-	}
-	else if (param.type_name.compare("i32") == 0)
-	{
-
-		outdc.add_line(fmt::format("ImGui::InputInt({},&component.{});", name_quoted, param.name));
-	}
-	else if (param.type_name.compare("vec3") == 0)
-	{
-		outdc.add_line(fmt::format("ImGui::InputFloat3({},&component.{}[0]);", name_quoted, param.name));
 	}
 	else
 	{
-		outdc.add_line(fmt::format("// parameter {} not editable", param.name));
+		outdc.add_line(fmt::format("imgui_edit_comp_{}(component.{})", param.type->real_name, param.name));
 	}
+	
+	
 
 };
-std::string get_imgui_edit_name(StructDefinition* stc) {
-	return fmt::format("void imgui_edit_comp_{}(const {} &component)",  stc->real_name, stc->real_name);
-}
+
 
 void write_imgui_edit(StructDefinition* stc, Document& outdc)
 {
@@ -114,6 +124,43 @@ bool fwd_declare_edit_function(StructDefinition* stc, Document& outdc)
 	return true;
 }
 
+bool fwd_declare_module_edit_function(Document& outdc)
+{
+	outdc.add_line("");
+	outdc.add_line("void edit_entity(entt::registry& rg, entt::entity id);");
+	return true;
+}
+
+bool write_module_edit_function(Module* mod, Document& outdc) {
+	outdc.add_line("");
+	outdc.add_line("void edit_entity(entt::registry& rg, entt::entity id){");
+
+	outdc.current_indent++;
+
+	for_each_struct(mod, [&](StructDefinition* stc) {
+
+		if (!stc->bIsDefault)
+		{
+			outdc.add_line(fmt::format("if(rg.has<{0}>(id) {{", stc->real_name));
+
+			outdc.current_indent++;
+
+			outdc.add_line(fmt::format("imgui_edit_comp_{0}(rg.get<{0}>(id));", stc->real_name));
+
+
+			outdc.current_indent--;
+			outdc.add_line("}");
+		}
+		
+	});
+	
+
+	outdc.current_indent--;
+	outdc.add_line("}");
+
+	return true;
+}
+
 bool output_module(struct Module* mod, Document& outHeader, Document& outSource, const OutputOptions& options)
 {
 
@@ -125,34 +172,25 @@ bool output_module(struct Module* mod, Document& outHeader, Document& outSource,
 
 
 	//forward declaration
-	for (auto [k,v] : mod->nodes)
-	{
-		if (v->type == RootType::STRUCT)
+	for_each_struct(mod, [&](StructDefinition* stc) {
+		if (!stc->bIsDefault)
 		{
-			StructDefinition* stc = static_cast<StructDefinition*>(v);
-			if (!stc->bIsDefault)
-			{
-				fwd_declare_struct(stc, outHeader);
-				fwd_declare_edit_function(stc, outHeader);
-			}
+			fwd_declare_struct(stc, outHeader);
+			fwd_declare_edit_function(stc, outHeader);
 		}
-	}
+	});
 
 	//definitions
-	for (auto [k, v] : mod->nodes)
-	{
-		if (v->type == RootType::STRUCT)
+	for_each_struct(mod, [&](StructDefinition* stc) {
+		if (!stc->bIsDefault)
 		{
-			StructDefinition* stc = static_cast<StructDefinition*>(v);
-			if (!stc->bIsDefault)
-			{
-				write_struct(stc, outHeader);
-				write_imgui_edit(stc, outSource);
-			}
+			write_struct(stc, outHeader);
+			write_imgui_edit(stc, outSource);
 		}
-	}
+	});
 
-
+	fwd_declare_module_edit_function(outHeader);
+	write_module_edit_function(mod, outSource);
 
 	return true;
 }

@@ -2,13 +2,8 @@
 #include <vector>
 #include <unordered_map>
 #include "tokenizer_types.h"
+#include "paged_vector.h"
 
-struct Module {
-	std::unordered_map<std::string,struct RootNode*> nodes;
-	std::unordered_map<std::string,struct RootNode*> aliases;
-
-	void initialize_default_types();
-};
 
 
 enum class RootType {
@@ -19,7 +14,7 @@ struct RootNode {
 	std::string real_name;
 	RootType type;
 	std::vector<Token> tokens;
-	Module* owner;
+	struct Module* owner;
 };
 
 enum class MetadataType : char {
@@ -50,3 +45,21 @@ struct StructDefinition : public RootNode {
 	std::vector<Parameter> parameters;
 	bool bIsDefault;
 };
+
+struct Module {
+	std::unordered_map<std::string, struct RootNode*> nodes;
+	std::unordered_map<std::string, struct RootNode*> aliases;
+
+	paged_vector<StructDefinition> structs;
+
+	void initialize_default_types();
+};
+
+template<typename F>
+void for_each_struct(Module* mod, F&& function)
+{
+	for (auto s : mod->structs)
+	{
+		function(&s);
+	}
+}
